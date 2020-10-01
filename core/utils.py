@@ -11,14 +11,21 @@ action_map = {
   'B': [WindowEvent.PRESS_BUTTON_B, WindowEvent.RELEASE_BUTTON_B]
 }
 
-do_action_map = {
-  0 : [WindowEvent.PRESS_ARROW_LEFT, WindowEvent.RELEASE_ARROW_LEFT],
-  1 : [WindowEvent.PRESS_ARROW_RIGHT, WindowEvent.RELEASE_ARROW_RIGHT],
-  2 : [WindowEvent.PRESS_ARROW_UP, WindowEvent.RELEASE_ARROW_UP],
-  3 : [WindowEvent.PRESS_ARROW_DOWN, WindowEvent.RELEASE_ARROW_DOWN],
-  4 : [WindowEvent.PRESS_BUTTON_A, WindowEvent.RELEASE_BUTTON_A],
-  5 : [WindowEvent.PRESS_BUTTON_B, WindowEvent.RELEASE_BUTTON_B]
+do_action_map_all = {
+  0 : [WindowEvent.RELEASE_ARROW_LEFT, WindowEvent.PRESS_ARROW_LEFT],
+  1 : [WindowEvent.RELEASE_ARROW_RIGHT, WindowEvent.PRESS_ARROW_RIGHT],
+  2 : [WindowEvent.RELEASE_ARROW_UP, WindowEvent.PRESS_ARROW_UP],
+  3 : [WindowEvent.RELEASE_ARROW_DOWN, WindowEvent.PRESS_ARROW_DOWN],
+  4 : [WindowEvent.RELEASE_BUTTON_A, WindowEvent.PRESS_BUTTON_A],
+  5 : [WindowEvent.RELEASE_BUTTON_B, WindowEvent.PRESS_BUTTON_B]
 }
+
+do_action_map = {
+  0 : [WindowEvent.RELEASE_ARROW_LEFT, WindowEvent.PRESS_ARROW_LEFT],
+  1 : [WindowEvent.RELEASE_ARROW_RIGHT, WindowEvent.PRESS_ARROW_RIGHT],
+  2 : [WindowEvent.RELEASE_BUTTON_A, WindowEvent.PRESS_BUTTON_A],
+}
+
 
 # List of Enemies
 enemies = {
@@ -48,14 +55,31 @@ solid_blocks.extend(pipes)
 
 def do_action(action, pyboy):
   # given action output (format: [0,0,0,0,0,0] where a 0 will be replaced with a 1 for an action)
-  #test[np.where(a == 1)[0].item(0)]
-  pyboy.send_input(do_action_map[np.where(action == 1)[0].item(0)][0])
+  pyboy.send_input(do_action_map[np.where(action == 1)[0].item(0)][1])
   ticks = 30
   while ticks > 0:
     pyboy.tick()
     ticks = ticks - 1
-  pyboy.send_input(do_action_map[np.where(action == 1)[0].item(0)][1])
+  pyboy.send_input(do_action_map[np.where(action == 1)[0].item(0)][0])
   pyboy.tick()
+
+def do_action_multiple(prev_action,action, pyboy):
+  # NOTE: simultaneous input is not implemented in pyboy yet
+  #this function takes in the output from the NN and does something
+  #format of input array: [left, right, up, down, a, b]
+  #Ex: [0,1,0,0,1,1] --> this array shows that right, a, and b should be pressed
+  # it seems that when you release a button that has not been pressed, it does something to the game
+  new_action = prev_action - action
+  for i in range(new_action.shape[0]):
+    if new_action[i] == 1:
+      # release that button
+      print('Release {}'.format(i))
+      pyboy.send_input(do_action_map[i][0])
+    elif new_action[i] == -1:
+      # press that button
+      print('Press {}'.format(i))
+      pyboy.send_input(do_action_map[i][1])
+  
 
 def move_right(pyboy):
   pyboy.send_input(action_map['Right'][0])

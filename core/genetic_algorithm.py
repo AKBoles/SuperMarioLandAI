@@ -6,7 +6,8 @@ from core.utils import convert_area
 #input_size = 176 # 16 * 11 --> size of screen in front of mario
 input_size = 320
 hidden_size = 80 # how to best select this value?
-output_size = 6 # number of options to press (buttons)
+#output_size = 6 # number of options to press (buttons) --> because simultaneous is not implemented yet, not using all buttons
+output_size = 3 # only allow for right, left, A
 
 elitism_pct = 0.2
 mutation_prob = 0.2
@@ -31,6 +32,7 @@ class Network(nn.Module):
       # sigmoid and softmax
       self.sigmoid = nn.Sigmoid()
       self.softmax = nn.Softmax(dim=1)
+      self.relu = nn.ReLU()
     else:
       self.output = output_w
 
@@ -39,9 +41,10 @@ class Network(nn.Module):
     x = torch.from_numpy(x)
     x = x.float()
     x = self.hidden(x)
-    x = self.sigmoid(x)
+    #x = self.sigmoid(x)
+    x = self.relu(x)
     x = self.output(x)
-    x = self.softmax(x)
+#    x = self.softmax(x)
     return x
 
   def activate(self, x):
@@ -107,7 +110,7 @@ class Population:
             model.output.weight.data[0][i].add_(noise[0])
 
 
-def get_score(pyboy, mario, model):
+def get_action(pyboy, mario, model):
   area = np.asarray(mario.game_area())
   # convert area into input format
   try:
@@ -116,7 +119,6 @@ def get_score(pyboy, mario, model):
     print(e)
     return None
   inputs = np.array(inputs)
-#  inputs = inputs.view(inputs.size(0), -1)
   inputs = inputs.reshape((1, 320))
   #output = model.activate(inputs)
   output = model.forward(inputs)

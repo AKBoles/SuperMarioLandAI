@@ -4,7 +4,7 @@ import torch
 import logging
 from datetime import datetime
 import pickle
-from core.genetic_algorithm import get_score, Population
+from core.genetic_algorithm import get_action, Population
 from core.utils import do_action,move_right, move_left, jump, right_jump, left_jump
 from pyboy import PyBoy
 from multiprocessing import Pool, cpu_count
@@ -21,14 +21,14 @@ ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 logger.addHandler(ch)
 
-epochs = 50
+epochs = 5
 population = None
 run_per_child = 1
 max_fitness = 0
 pop_size = 10
 max_score = 999999
 #n_workers = cpu_count()
-n_workers = 10
+n_workers = 3
 
 def eval_network(epoch, child_index, child_model):
   pyboy = PyBoy('SuperMarioLand.gb', game_wrapper=True) #, window_type="headless")
@@ -42,20 +42,20 @@ def eval_network(epoch, child_index, child_model):
   fitness_scores = []
   level_progress = []
   time_left = []
+  #prev_action = np.asarray([0,0,0,0,0,0])
 
   while run < run_per_child:
-    #begin_state = io.BytesIO()
-    #begin_state.seek(0)
-    #pyboy.save_state(begin_state)
 
-    # now need to DO something...
-    action = get_score(pyboy, mario, child_model)
-#    action = np.asarray(action)
+    # do some things
+    action = get_action(pyboy, mario, child_model)
     action = action.detach().numpy()
     action = np.where(action < np.max(action), 0, action)
     action = np.where(action == np.max(action), 1, action)
-    action = action.reshape((6,))
+    action = action.astype(int)
+    action = action.reshape((3,))
+    #do_action(prev_action,action, pyboy) # simultaneous action is not implemented yet..
     do_action(action, pyboy)
+    #prev_action = action
 
     # Game over:
     if mario.game_over() or mario.score == max_score:
