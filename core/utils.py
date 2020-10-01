@@ -1,16 +1,7 @@
 import numpy as np
 from pyboy import WindowEvent
 
-# Action map
-action_map = {
-  'Left': [WindowEvent.PRESS_ARROW_LEFT, WindowEvent.RELEASE_ARROW_LEFT],
-  'Right': [WindowEvent.PRESS_ARROW_RIGHT, WindowEvent.RELEASE_ARROW_RIGHT],
-  'Up': [WindowEvent.PRESS_ARROW_UP, WindowEvent.RELEASE_ARROW_UP],
-  'Down': [WindowEvent.PRESS_ARROW_DOWN, WindowEvent.RELEASE_ARROW_DOWN],
-  'A': [WindowEvent.PRESS_BUTTON_A, WindowEvent.RELEASE_BUTTON_A],
-  'B': [WindowEvent.PRESS_BUTTON_B, WindowEvent.RELEASE_BUTTON_B]
-}
-
+# Action Map
 do_action_map_all = {
   0 : [WindowEvent.RELEASE_ARROW_LEFT, WindowEvent.PRESS_ARROW_LEFT],
   1 : [WindowEvent.RELEASE_ARROW_RIGHT, WindowEvent.PRESS_ARROW_RIGHT],
@@ -21,9 +12,9 @@ do_action_map_all = {
 }
 
 do_action_map = {
-  0 : [WindowEvent.RELEASE_ARROW_LEFT, WindowEvent.PRESS_ARROW_LEFT],
-  1 : [WindowEvent.RELEASE_ARROW_RIGHT, WindowEvent.PRESS_ARROW_RIGHT],
-  2 : [WindowEvent.RELEASE_BUTTON_A, WindowEvent.PRESS_BUTTON_A],
+#  0 : [WindowEvent.RELEASE_ARROW_LEFT, WindowEvent.PRESS_ARROW_LEFT],
+  0 : [WindowEvent.RELEASE_ARROW_RIGHT, WindowEvent.PRESS_ARROW_RIGHT],
+  1 : [WindowEvent.RELEASE_BUTTON_A, WindowEvent.PRESS_BUTTON_A],
 }
 
 
@@ -80,41 +71,6 @@ def do_action_multiple(prev_action,action, pyboy):
       print('Press {}'.format(i))
       pyboy.send_input(do_action_map[i][1])
   
-
-def move_right(pyboy):
-  pyboy.send_input(action_map['Right'][0])
-  pyboy.tick()
-  pyboy.send_input(action_map['Right'][1])
-  pyboy.tick()
-
-def move_left(pyboy):
-  pyboy.send_input(action_map['Left'][0])
-  pyboy.tick()
-  pyboy.send_input(action_map['Left'][1])
-  pyboy.tick()
-
-def jump(pyboy):
-  pyboy.send_input(action_map['A'][0])
-  ticks = 60
-  while ticks > 0:
-    pyboy.tick()
-    ticks = ticks - 1
-  pyboy.send_input(action_map['A'][1])
-  pyboy.tick()
-
-def right_jump(pyboy):
-  pyboy.send_input(action_map['Right'][0])
-  jump(pyboy)
-  pyboy.send_input(action_map['Right'][1])
-  pyboy.tick()
-
-def left_jump(pyboy):
-  pyboy.send_input(action_map['Left'][0])
-  jump(pyboy)
-  pyboy.send_input(action_map['Left'][1])
-  pyboy.tick()
-
-
 # following functions are for getting screen information
 
 def convert_area(area, pyboy):
@@ -133,14 +89,6 @@ def convert_area(area, pyboy):
 #  return area[:, mario_loc[0]:]
   return area
 
-def get_loc_enemies(area):
-  enemy_loc = sum(enemies.values(),[])
-  loc = []
-  for value in enemy_loc:
-    if np.where(area == value)[0].size > 0:
-      loc.append(np.asarray(np.where(area == value)))
-  return loc
-
 def get_mario(pyboy):
   # get mario location directly from memory
   mario_x = pyboy.get_memory_value(0xC202)
@@ -151,3 +99,11 @@ def get_mario(pyboy):
   # note: x --> col, y--> row
   return([mario_x, mario_y])
 
+# following function is to calculate the fitness of the run
+def fitness_calc(score, level_progress, time_left):
+  # score and level_progress need to be highly weighted
+  # also the faster that you get through level, the better
+  #return level_progress**1.9 + time_left**1.5 + score**1.5
+  # trying to just square the level progress and see how that works
+  level_progress = level_progress - 250
+  return level_progress*level_progress

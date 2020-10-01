@@ -3,11 +3,12 @@ import torch
 import torch.nn as nn
 from core.utils import convert_area
 
-#input_size = 176 # 16 * 11 --> size of screen in front of mario
 input_size = 320
-hidden_size = 80 # how to best select this value?
+hidden_size_1 = 80
+hidden_size_2 = 20
 #output_size = 6 # number of options to press (buttons) --> because simultaneous is not implemented yet, not using all buttons
-output_size = 3 # only allow for right, left, A
+#output_size = 3 # only allow for right, left, A
+output_size = 2 # only allow for right, A
 
 elitism_pct = 0.2
 mutation_prob = 0.2
@@ -25,11 +26,13 @@ class Network(nn.Module):
       #self.output.weight.requires_grad_(False)
       #torch.nn.init.uniform_(self.output.weight, a=weights_init_min, b=weights_init_max)
 
-      # inputs to hidden layer
-      self.hidden = nn.Linear(input_size, hidden_size)
-      # hidden to output
-      self.output = nn.Linear(hidden_size, output_size)
-      # sigmoid and softmax
+      # inputs to hidden1
+      self.hidden1 = nn.Linear(input_size, hidden_size_1)
+      # hidden1 to hidden2
+      self.hidden2 = nn.Linear(hidden_size_1, hidden_size_2)
+      # hidden2 to output
+      self.output = nn.Linear(hidden_size_2, output_size)
+      # sigmoid and softmax and relu
       self.sigmoid = nn.Sigmoid()
       self.softmax = nn.Softmax(dim=1)
       self.relu = nn.ReLU()
@@ -40,8 +43,9 @@ class Network(nn.Module):
     # Pass the input tensor through each of our operations
     x = torch.from_numpy(x)
     x = x.float()
-    x = self.hidden(x)
-    #x = self.sigmoid(x)
+    x = self.hidden1(x)
+    x = self.relu(x)
+    x = self.hidden2(x)
     x = self.relu(x)
     x = self.output(x)
 #    x = self.softmax(x)
@@ -68,7 +72,7 @@ class Population:
     self.fitnesses = np.zeros(self.size)
 
   def crossover(self):
-    print("Crossver")
+    print('Crossover')
     sum_fitnesses = np.sum(self.old_fitnesses)
     probs = [self.old_fitnesses[i] / sum_fitnesses for i in range(self.size)]
 
@@ -89,7 +93,7 @@ class Population:
         model_a, model_b = self.old_models[a], self.old_models[b]
         model_c = Network()
 
-        for j in range(input_size):
+        for j in range(hidden_size_2):
           # Neuron will come from A with probability
           # of `prob_neuron_from_a`
           if np.random.random() > prob_neuron_from_a:
@@ -103,7 +107,7 @@ class Population:
     print("Mutating")
     for model in self.models:
       # Mutating weights by adding Gaussian noises
-      for i in range(input_size):
+      for i in range(hidden_size_2):
         if np.random.random() < mutation_prob:
           with torch.no_grad():
             noise = torch.randn(1).mul_(weights_mutate_power).to(device)
@@ -119,7 +123,7 @@ def get_action(pyboy, mario, model):
     print(e)
     return None
   inputs = np.array(inputs)
-  inputs = inputs.reshape((1, 320))
+  inputs = inputs.reshape((1, input_size))
   #output = model.activate(inputs)
   output = model.forward(inputs)
   return output

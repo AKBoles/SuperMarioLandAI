@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 import pickle
 from core.genetic_algorithm import get_action, Population
-from core.utils import do_action,move_right, move_left, jump, right_jump, left_jump
+from core.utils import do_action, fitness_calc
 from pyboy import PyBoy
 from multiprocessing import Pool, cpu_count
 
@@ -21,21 +21,22 @@ ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 logger.addHandler(ch)
 
-epochs = 5
+epochs = 50
 population = None
 run_per_child = 1
 max_fitness = 0
 pop_size = 10
 max_score = 999999
 #n_workers = cpu_count()
-n_workers = 3
+n_workers = 10
 
 def eval_network(epoch, child_index, child_model):
   pyboy = PyBoy('SuperMarioLand.gb', game_wrapper=True) #, window_type="headless")
   pyboy.set_emulation_speed(3)
   mario = pyboy.game_wrapper()
   mario.start_game()
-  #assert mario.lives_left == 0
+  # start off with just one life each
+  mario.set_lives_left(0)
 
   run = 0
   scores = []
@@ -52,7 +53,7 @@ def eval_network(epoch, child_index, child_model):
     action = np.where(action < np.max(action), 0, action)
     action = np.where(action == np.max(action), 1, action)
     action = action.astype(int)
-    action = action.reshape((3,))
+    action = action.reshape((2,))
     #do_action(prev_action,action, pyboy) # simultaneous action is not implemented yet..
     do_action(action, pyboy)
     #prev_action = action
@@ -60,7 +61,8 @@ def eval_network(epoch, child_index, child_model):
     # Game over:
     if mario.game_over() or mario.score == max_score:
       scores.append(mario.score)
-      fitness_scores.append(mario.fitness)
+      #fitness_scores.append(mario.fitness)
+      fitness_scores.append(fitness_calc(mario.score, mario.level_progress, mario.time_left))
       level_progress.append(mario.level_progress)
       time_left.append(mario.time_left)
       if run == run_per_child - 1:
