@@ -118,6 +118,5 @@ if __name__ == '__main__':
       torch.save(population.models[np.argmax(population.fitnesses)].state_dict(),'models/%s' % file_name)
     e += 1
 
-  #p.join()
   p.close()
   p.join()

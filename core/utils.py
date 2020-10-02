@@ -46,12 +46,21 @@ solid_blocks.extend(pipes)
 
 def do_action(action, pyboy):
   # given action output (format: [0,0,0,0,0,0] where a 0 will be replaced with a 1 for an action)
-  pyboy.send_input(do_action_map[np.where(action == 1)[0].item(0)][1])
-  ticks = 30
-  while ticks > 0:
-    pyboy.tick()
-    ticks = ticks - 1
-  pyboy.send_input(do_action_map[np.where(action == 1)[0].item(0)][0])
+  if action[0] == 1:
+    pyboy.send_input(do_action_map[0][1])
+    ticks = 5
+    while ticks > 0:
+      pyboy.tick()
+      ticks = ticks - 1
+    pyboy.send_input(do_action_map[0][0])
+  else:
+    pyboy.send_input(do_action_map[1][1])
+    ticks = 30
+    while ticks > 0:
+      pyboy.tick()
+      ticks = ticks - 1
+    pyboy.send_input(do_action_map[1][0])
+  #pyboy.send_input(do_action_map[np.where(action == 1)[0].item(0)][0])
   pyboy.tick()
 
 def do_action_multiple(prev_action,action, pyboy):
@@ -77,6 +86,7 @@ def convert_area(area, pyboy):
   # mario is a 2
   mario_loc = get_mario(pyboy)
   area[mario_loc[1]][mario_loc[0]] = 2
+  area = np.where((area == 0) | (area == 1), 0, area)
   # solid blocks are a 1
   for value in solid_blocks:
     area = np.where((area == value), 1, area)
@@ -86,8 +96,8 @@ def convert_area(area, pyboy):
   # everything else is empty space
   area = np.where(area > 2, 0, area)
   # now need to only return array with cols > col where mario is --> only area in front of mario
-#  return area[:, mario_loc[0]:]
-  return area
+  return area[:, mario_loc[0]:mario_loc[0]+10]
+#  return area
 
 def get_mario(pyboy):
   # get mario location directly from memory
@@ -104,6 +114,5 @@ def fitness_calc(score, level_progress, time_left):
   # score and level_progress need to be highly weighted
   # also the faster that you get through level, the better
   #return level_progress**1.9 + time_left**1.5 + score**1.5
-  # trying to just square the level progress and see how that works
   level_progress = level_progress - 250
-  return level_progress*level_progress
+  return level_progress**2

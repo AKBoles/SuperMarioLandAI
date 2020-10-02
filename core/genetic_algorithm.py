@@ -3,9 +3,10 @@ import torch
 import torch.nn as nn
 from core.utils import convert_area
 
-input_size = 320
-hidden_size_1 = 80
-hidden_size_2 = 20
+#input_size = 320
+input_size = 160
+hidden_size_1 = 12
+hidden_size_2 = 9
 #output_size = 6 # number of options to press (buttons) --> because simultaneous is not implemented yet, not using all buttons
 #output_size = 3 # only allow for right, left, A
 output_size = 2 # only allow for right, A
@@ -48,7 +49,7 @@ class Network(nn.Module):
     x = self.hidden2(x)
     x = self.relu(x)
     x = self.output(x)
-#    x = self.softmax(x)
+    x = self.sigmoid(x)
     return x
 
   def activate(self, x):
