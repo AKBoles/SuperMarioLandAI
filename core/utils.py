@@ -48,7 +48,7 @@ def do_action(action, pyboy):
   # given action output (format: [0,0,0,0,0,0] where a 0 will be replaced with a 1 for an action)
   if action[0] == 1:
     pyboy.send_input(do_action_map[0][1])
-    ticks = 5
+    ticks = 1
     while ticks > 0:
       pyboy.tick()
       ticks = ticks - 1
@@ -63,23 +63,26 @@ def do_action(action, pyboy):
   #pyboy.send_input(do_action_map[np.where(action == 1)[0].item(0)][0])
   pyboy.tick()
 
-def do_action_multiple(prev_action,action, pyboy):
+def do_action_multiple(prev_action,action,pyboy):
   # NOTE: simultaneous input is not implemented in pyboy yet
-  #this function takes in the output from the NN and does something
-  #format of input array: [left, right, up, down, a, b]
-  #Ex: [0,1,0,0,1,1] --> this array shows that right, a, and b should be pressed
-  # it seems that when you release a button that has not been pressed, it does something to the game
+  # because of this, I will be doing a different version..
+  # format of input array: [right,a]
   new_action = prev_action - action
-  for i in range(new_action.shape[0]):
-    if new_action[i] == 1:
-      # release that button
-      print('Release {}'.format(i))
-      pyboy.send_input(do_action_map[i][0])
-    elif new_action[i] == -1:
-      # press that button
-      print('Press {}'.format(i))
-      pyboy.send_input(do_action_map[i][1])
-  
+#  print('Prev_action: {} ; Action: {}'.format(prev_action, action))
+  if new_action.any() != 0:
+    # first release button if needed
+    if new_action[0] == -1:
+      pyboy.send_input(do_action_map[0][0])
+    elif new_action[1] == -1:
+      pyboy.send_input(do_action_map[1][0])
+    # now press button that needs to be pressed
+    if action[0] == 1:
+      pyboy.tick()
+      pyboy.send_input(do_action_map[0][1])
+    elif action[1] == 1:
+      pyboy.tick()
+      pyboy.send_input(do_action_map[1][1])
+
 # following functions are for getting screen information
 
 def convert_area(area, pyboy):

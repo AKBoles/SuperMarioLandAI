@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 import pickle
 from core.genetic_algorithm import get_action, Population
-from core.utils import do_action, fitness_calc
+from core.utils import do_action, do_action_multiple, fitness_calc
 from pyboy import PyBoy
 from multiprocessing import Pool, cpu_count
 
@@ -25,7 +25,7 @@ epochs = 50
 population = None
 run_per_child = 1
 max_fitness = 0
-pop_size = 10
+pop_size = 1
 max_score = 999999
 #n_workers = cpu_count()
 n_workers = 10
@@ -43,7 +43,8 @@ def eval_network(epoch, child_index, child_model):
   fitness_scores = []
   level_progress = []
   time_left = []
-  #prev_action = np.asarray([0,0,0,0,0,0])
+#  prev_action = np.asarray([1,0])
+#  do_action(prev_action, pyboy)
 
   while run < run_per_child:
 
@@ -54,9 +55,9 @@ def eval_network(epoch, child_index, child_model):
     action = np.where(action == np.max(action), 1, action)
     action = action.astype(int)
     action = action.reshape((2,))
-    #do_action(prev_action,action, pyboy) # simultaneous action is not implemented yet..
+#    do_action_multiple(prev_action,action,pyboy)
     do_action(action, pyboy)
-    #prev_action = action
+#    prev_action = action
 
     # Game over:
     if mario.game_over() or mario.score == max_score:
@@ -115,7 +116,7 @@ if __name__ == '__main__':
       max_fitness = np.max(population.fitnesses)
       file_name = datetime.strftime(datetime.now(), '%d_%H_%M_') + str(np.round(max_fitness, 2))
       # Saving best model
-      torch.save(population.models[np.argmax(population.fitnesses)].state_dict(),'models/%s' % file_name)
+      torch.save(population.models[np.argmax(population.fitnesses)].state_dict(),'models/{}'.format(file_name))
     e += 1
 
   p.close()

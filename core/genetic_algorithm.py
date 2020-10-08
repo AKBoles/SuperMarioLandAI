@@ -5,8 +5,8 @@ from core.utils import convert_area
 
 #input_size = 320
 input_size = 160
-hidden_size_1 = 12
-hidden_size_2 = 9
+hidden_size_1 = 80
+hidden_size_2 = 20
 #output_size = 6 # number of options to press (buttons) --> because simultaneous is not implemented yet, not using all buttons
 #output_size = 3 # only allow for right, left, A
 output_size = 2 # only allow for right, A
@@ -49,7 +49,7 @@ class Network(nn.Module):
     x = self.hidden2(x)
     x = self.relu(x)
     x = self.output(x)
-    x = self.sigmoid(x)
+#    x = self.sigmoid(x)
     return x
 
   def activate(self, x):
@@ -76,6 +76,9 @@ class Population:
     print('Crossover')
     sum_fitnesses = np.sum(self.old_fitnesses)
     probs = [self.old_fitnesses[i] / sum_fitnesses for i in range(self.size)]
+    for i in range(self.old_fitnesses.size):
+      print(i, self.old_fitnesses[i])
+    print('old fitnesses arg sort: {}'.format(np.argsort(self.old_fitnesses)[::-1]))
 
     # Sorting descending NNs according to their fitnesses
     sort_indices = np.argsort(probs)[::-1]
@@ -127,4 +130,16 @@ def get_action(pyboy, mario, model):
   inputs = inputs.reshape((1, input_size))
   #output = model.activate(inputs)
   output = model.forward(inputs)
+  return output
+
+def get_action_neat(pyboy, mario, model):
+  area = np.asarray(mario.game_area())
+  # convert area into input format
+  try:
+    inputs = convert_area(area, pyboy)
+  except Exception as e:
+    print(e)
+    return None
+  inputs = inputs.reshape((input_size, 1))
+  output = model.activate(inputs)
   return output
