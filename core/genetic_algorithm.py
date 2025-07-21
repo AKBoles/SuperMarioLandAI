@@ -1,18 +1,17 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from core.utils import convert_area
+from core.utils import mario_controls
 
-#input_size = 320
-input_size = 160
+# Network parameters
+input_size = 400  # Approximate size for flattened game area (20x20)
 hidden_size_1 = 80
 hidden_size_2 = 20
-#output_size = 6 # number of options to press (buttons) --> because simultaneous is not implemented yet, not using all buttons
-#output_size = 3 # only allow for right, left, A
-output_size = 2 # only allow for right, A
+output_size = 9  # Number of possible actions (from mario_controls())
 
+# Evolution parameters
 elitism_pct = 0.2
-mutation_prob = 0.2
+mutation_prob = 0.3
 weights_init_min = -1
 weights_init_max = 1
 weights_mutate_power = 0.5
@@ -20,126 +19,172 @@ weights_mutate_power = 0.5
 device = 'cpu'
 
 class Network(nn.Module):
-  def __init__(self, output_w=None):
-    super(Network, self).__init__()
-    if not output_w:
-      #self.output = nn.Linear(input_size, output_size, bias=False).to(device)
-      #self.output.weight.requires_grad_(False)
-      #torch.nn.init.uniform_(self.output.weight, a=weights_init_min, b=weights_init_max)
+    def __init__(self):
+        super(Network, self).__init__()
+        # Build a simple feedforward network
+        self.hidden1 = nn.Linear(input_size, hidden_size_1)
+        self.hidden2 = nn.Linear(hidden_size_1, hidden_size_2)
+        self.output = nn.Linear(hidden_size_2, output_size)
+        
+        # Activation functions
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax(dim=-1)
+        
+        # Initialize weights
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                torch.nn.init.uniform_(module.weight, a=weights_init_min, b=weights_init_max)
+                if module.bias is not None:
+                    torch.nn.init.zeros_(module.bias)
+    
+    def forward(self, x):
+        # Ensure input is a tensor
+        if isinstance(x, np.ndarray):
+            x = torch.from_numpy(x).float()
+        
+        # Reshape if necessary
+        if len(x.shape) == 1:
+            x = x.unsqueeze(0)  # Add batch dimension
+        
+        # Forward pass
+        x = self.relu(self.hidden1(x))
+        x = self.relu(self.hidden2(x))
+        x = self.output(x)
+        
+        return x
+    
+    def get_action(self, x):
+        """Get the best action for the given input"""
+        with torch.no_grad():
+            output = self.forward(x)
+            action = torch.argmax(output, dim=-1)
+            return action.item() if output.shape[0] == 1 else action.numpy()
 
-      # inputs to hidden1
-      self.hidden1 = nn.Linear(input_size, hidden_size_1)
-      # hidden1 to hidden2
-      self.hidden2 = nn.Linear(hidden_size_1, hidden_size_2)
-      # hidden2 to output
-      self.output = nn.Linear(hidden_size_2, output_size)
-      # sigmoid and softmax and relu
-      self.sigmoid = nn.Sigmoid()
-      self.softmax = nn.Softmax(dim=1)
-      self.relu = nn.ReLU()
-    else:
-      self.output = output_w
-
-  def forward(self, x):
-    # Pass the input tensor through each of our operations
-    x = torch.from_numpy(x)
-    x = x.float()
-    x = self.hidden1(x)
-    x = self.relu(x)
-    x = self.hidden2(x)
-    x = self.relu(x)
-    x = self.output(x)
-#    x = self.sigmoid(x)
-    return x
-
-  def activate(self, x):
-    with torch.no_grad():
-      x = torch.from_numpy(x).float().to(device)
-      x = self.output(x)
-    return x
+class Genome:
+    def __init__(self, network=None):
+        if network is None:
+            self.phenome = Network()
+        else:
+            self.phenome = network
+        self.fitness = 0.0
+    
+    def copy(self):
+        """Create a copy of this genome"""
+        new_network = Network()
+        new_network.load_state_dict(self.phenome.state_dict())
+        return Genome(new_network)
 
 class Population:
-  def __init__(self, size=50, old_population=None):
-    self.size = size
-    if old_population is None:
-      self.models = [Network() for i in range(size)]
-    else:
-      # Copy the child
-      self.old_models = old_population.models
-      self.old_fitnesses = old_population.fitnesses
-      self.models = []
-      self.crossover()
-      self.mutate()
-    self.fitnesses = np.zeros(self.size)
+    def __init__(self, size=20):
+        self.size = size
+        self.genomes = [Genome() for _ in range(size)]
+        self.fitnesses = np.zeros(size)
+        self.generation = 0
+    
+    def evaluate(self, fitnesses):
+        """Set fitness values for the population"""
+        self.fitnesses = np.array(fitnesses)
+        for i, genome in enumerate(self.genomes):
+            genome.fitness = fitnesses[i]
+    
+    def create_new_generation(self):
+        """Create a new generation using selection, crossover, and mutation"""
+        # Sort genomes by fitness (descending)
+        sorted_indices = np.argsort(self.fitnesses)[::-1]
+        
+        new_genomes = []
+        elite_size = int(self.size * elitism_pct)
+        
+        # Elitism: keep the best genomes
+        for i in range(elite_size):
+            new_genomes.append(self.genomes[sorted_indices[i]].copy())
+        
+        # Fill the rest with crossover and mutation
+        while len(new_genomes) < self.size:
+            # Tournament selection
+            parent1 = self._tournament_selection()
+            parent2 = self._tournament_selection()
+            
+            # Crossover
+            child = self._crossover(parent1, parent2)
+            
+            # Mutation
+            self._mutate(child)
+            
+            new_genomes.append(child)
+        
+        self.genomes = new_genomes
+        self.generation += 1
+        self.fitnesses = np.zeros(self.size)
+    
+    def _tournament_selection(self, tournament_size=3):
+        """Select a parent using tournament selection"""
+        # Choose random candidates
+        candidates = np.random.choice(len(self.genomes), tournament_size, replace=False)
+        # Return the best one
+        best_idx = candidates[np.argmax(self.fitnesses[candidates])]
+        return self.genomes[best_idx]
+    
+    def _crossover(self, parent1, parent2):
+        """Create offspring through crossover"""
+        child = Genome()
+        
+        # Uniform crossover for each layer
+        for child_param, p1_param, p2_param in zip(
+            child.phenome.parameters(), 
+            parent1.phenome.parameters(), 
+            parent2.phenome.parameters()
+        ):
+            # Create a random mask for crossover
+            mask = torch.rand_like(p1_param) > 0.5
+            child_param.data = torch.where(mask, p1_param.data, p2_param.data)
+        
+        return child
+    
+    def _mutate(self, genome):
+        """Mutate a genome"""
+        for param in genome.phenome.parameters():
+            # Add random noise to weights with some probability
+            mutation_mask = torch.rand_like(param) < mutation_prob
+            noise = torch.randn_like(param) * weights_mutate_power
+            param.data += mutation_mask.float() * noise
+    
+    def get_best_genome(self):
+        """Get the genome with the highest fitness"""
+        best_idx = np.argmax(self.fitnesses)
+        return self.genomes[best_idx]
 
-  def crossover(self):
-    print('Crossover')
-    sum_fitnesses = np.sum(self.old_fitnesses)
-    probs = [self.old_fitnesses[i] / sum_fitnesses for i in range(self.size)]
-    for i in range(self.old_fitnesses.size):
-      print(i, self.old_fitnesses[i])
-    print('old fitnesses arg sort: {}'.format(np.argsort(self.old_fitnesses)[::-1]))
-
-    # Sorting descending NNs according to their fitnesses
-    sort_indices = np.argsort(probs)[::-1]
-    for i in range(self.size):
-      if i < self.size * elitism_pct:
-        # Add the top performing childs
-        model_c = self.old_models[sort_indices[i]]
-      else:
-        a, b = np.random.choice(self.size, size=2, p=probs, replace=False)
-        # sum_parent = self.old_fitnesses[a] + self.old_fitnesses[b]
-        # Probability that each neuron will come from model A
-        # prob_neuron_from_a = \
-        #     self.old_fitnesses[a] / sum_parent
-        prob_neuron_from_a = 0.5
-
-        model_a, model_b = self.old_models[a], self.old_models[b]
-        model_c = Network()
-
-        for j in range(hidden_size_2):
-          # Neuron will come from A with probability
-          # of `prob_neuron_from_a`
-          if np.random.random() > prob_neuron_from_a:
-            model_c.output.weight.data[0][j] = model_b.output.weight.data[0][j]
-          else:
-            model_c.output.weight.data[0][j] = model_a.output.weight.data[0][j]
-
-      self.models.append(model_c)
-
-  def mutate(self):
-    print("Mutating")
-    for model in self.models:
-      # Mutating weights by adding Gaussian noises
-      for i in range(hidden_size_2):
-        if np.random.random() < mutation_prob:
-          with torch.no_grad():
-            noise = torch.randn(1).mul_(weights_mutate_power).to(device)
-            model.output.weight.data[0][i].add_(noise[0])
-
-
-def get_action(pyboy, mario, model):
-  area = np.asarray(mario.game_area())
-  # convert area into input format
-  try:
-    inputs = convert_area(area, pyboy)
-  except Exception as e:
-    print(e)
-    return None
-  inputs = np.array(inputs)
-  inputs = inputs.reshape((1, input_size))
-  #output = model.activate(inputs)
-  output = model.forward(inputs)
-  return output
-
-def get_action_neat(pyboy, mario, model):
-  area = np.asarray(mario.game_area())
-  # convert area into input format
-  try:
-    inputs = convert_area(area, pyboy)
-  except Exception as e:
-    print(e)
-    return None
-  inputs = inputs.reshape((input_size, 1))
-  output = model.activate(inputs)
-  return output
+def get_action(phenome, inputs):
+    """
+    Get action from neural network given game inputs
+    
+    Args:
+        phenome: The neural network (Network instance)
+        inputs: Flattened game area or state
+    
+    Returns:
+        Action index (0-8 corresponding to mario_controls())
+    """
+    try:
+        # Ensure inputs are the right size
+        if len(inputs) > input_size:
+            # Resize inputs if they're too large
+            inputs = inputs[:input_size]
+        elif len(inputs) < input_size:
+            # Pad inputs if they're too small
+            padded = np.zeros(input_size)
+            padded[:len(inputs)] = inputs
+            inputs = padded
+        
+        # Get action from the network
+        action = phenome.get_action(inputs)
+        
+        # Ensure action is in valid range
+        return int(action) % len(mario_controls())
+        
+    except Exception as e:
+        print(f"Error in get_action: {e}")
+        return 0  # Default action (no action)

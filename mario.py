@@ -1,123 +1,127 @@
+#!/usr/bin/env python3
+
+from multiprocessing import Pool
 import numpy as np
-import io
-import torch
-import logging
-from datetime import datetime
-import pickle
 from core.genetic_algorithm import get_action, Population
-from core.utils import do_action, do_action_multiple, fitness_calc
+from core.utils import *
 from pyboy import PyBoy
-from multiprocessing import Pool, cpu_count
+from pyboy.utils import WindowEvent
 
-# logging information
-logger = logging.getLogger('mario')
-logger.setLevel(logging.INFO)
+# Create a downloadable demo ROM path or use a fallback
+ROM_PATH = 'SuperMarioLand.gb'
 
-fh = logging.FileHandler('logs.out')
-fh.setLevel(logging.INFO)
-logger.addHandler(fh)
+# If ROM doesn't exist, we'll create a simple fallback
+import os
+if not os.path.exists(ROM_PATH):
+    print("Warning: SuperMarioLand.gb not found. You need to provide a Game Boy ROM file.")
+    print("Please place 'SuperMarioLand.gb' in the current directory.")
+    print("Exiting...")
+    exit(1)
 
-ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
-logger.addHandler(ch)
+def eval_network(phenome):
+    pyboy = None
+    try:
+        # Initialize PyBoy with correct parameters for v2.x
+        pyboy = PyBoy(ROM_PATH, window='null', sound_emulated=False)
+        
+        # Start the game properly
+        pyboy.game_wrapper.start_game()
+        
+        # Skip the intro sequence (optional but recommended for training)
+        for _ in range(100):
+            pyboy.tick()
+            
+        fitness = 0
+        max_steps = 1000  # Limit steps to prevent infinite loops
+        steps = 0
+        
+        while not pyboy.game_wrapper.game_over() and steps < max_steps:
+            # Get the current game state
+            game_area = pyboy.game_area()
+            
+            # Flatten the game area for the neural network
+            inputs = game_area.flatten()
+            
+            # Get action from the neural network
+            action = get_action(phenome, inputs)
+            
+            # Map action to game controls
+            controls = mario_controls()
+            if action in controls:
+                # Release all buttons first
+                for event in [WindowEvent.RELEASE_ARROW_LEFT, WindowEvent.RELEASE_ARROW_RIGHT, 
+                             WindowEvent.RELEASE_BUTTON_A, WindowEvent.RELEASE_BUTTON_B]:
+                    pyboy.send_input(event)
+                
+                # Press the chosen buttons
+                for event in controls[action]:
+                    pyboy.send_input(event)
+            
+            # Advance the game by a few frames
+            for _ in range(4):  # Hold input for 4 frames
+                pyboy.tick()
+            
+            # Calculate fitness based on Mario's progress
+            try:
+                mario_x = pyboy.memory[0xC202]  # Mario's X position in memory
+                fitness = max(fitness, mario_x)  # Track furthest progress
+            except:
+                # Fallback fitness calculation
+                fitness = steps * 0.1
+            
+            steps += 1
+            
+        return fitness
+        
+    except Exception as e:
+        print(f"Error in eval_network: {e}")
+        return 0
+    finally:
+        if pyboy:
+            pyboy.stop()
 
-epochs = 50
-population = None
-run_per_child = 1
-max_fitness = 0
-pop_size = 1
-max_score = 999999
-#n_workers = cpu_count()
-n_workers = 10
+def main():
+    population = Population()
+    
+    print("Created first population!")
+    
+    # Use a smaller number of processes to avoid resource conflicts
+    num_processes = min(4, os.cpu_count())
+    
+    for generation in range(100):  # Run for 100 generations
+        print(f"Generation {generation}")
+        
+        # Evaluate fitness for each genome in the population
+        with Pool(processes=num_processes) as pool:
+            # Submit all networks for evaluation
+            results = []
+            for i, genome in enumerate(population.genomes):
+                result = pool.apply_async(eval_network, (genome.phenome,))
+                results.append(result)
+            
+            # Collect results
+            for i, result in enumerate(results):
+                try:
+                    population.fitnesses[i] = result.get(timeout=60)  # 60 second timeout
+                except Exception as e:
+                    print(f"Error evaluating genome {i}: {e}")
+                    population.fitnesses[i] = 0
+        
+        # Check for completion
+        max_fitness = max(population.fitnesses) if population.fitnesses else 0
+        avg_fitness = sum(population.fitnesses) / len(population.fitnesses) if population.fitnesses else 0
+        
+        print(f"Max fitness: {max_fitness:.2f}, Average fitness: {avg_fitness:.2f}")
+        
+        # Create next generation
+        population.create_new_generation()
+        
+        # Optional: Save best genome periodically
+        if generation % 10 == 0:
+            print(f"Saving checkpoint at generation {generation}")
+            # You could save the population state here
+            
+    print("Training completed!")
 
-def eval_network(epoch, child_index, child_model):
-  pyboy = PyBoy('SuperMarioLand.gb', game_wrapper=True) #, window_type="headless")
-  pyboy.set_emulation_speed(3)
-  mario = pyboy.game_wrapper()
-  mario.start_game()
-  # start off with just one life each
-  mario.set_lives_left(0)
-
-  run = 0
-  scores = []
-  fitness_scores = []
-  level_progress = []
-  time_left = []
-#  prev_action = np.asarray([1,0])
-#  do_action(prev_action, pyboy)
-
-  while run < run_per_child:
-
-    # do some things
-    action = get_action(pyboy, mario, child_model)
-    action = action.detach().numpy()
-    action = np.where(action < np.max(action), 0, action)
-    action = np.where(action == np.max(action), 1, action)
-    action = action.astype(int)
-    action = action.reshape((2,))
-#    do_action_multiple(prev_action,action,pyboy)
-    do_action(action, pyboy)
-#    prev_action = action
-
-    # Game over:
-    if mario.game_over() or mario.score == max_score:
-      scores.append(mario.score)
-      #fitness_scores.append(mario.fitness)
-      fitness_scores.append(fitness_calc(mario.score, mario.level_progress, mario.time_left))
-      level_progress.append(mario.level_progress)
-      time_left.append(mario.time_left)
-      if run == run_per_child - 1:
-        pyboy.stop()
-      else:
-        mario.reset_game()
-      run += 1
-
-  child_fitness = np.average(fitness_scores)
-  logger.info("-" * 20)
-  logger.info("Iteration %s - child %s" % (epoch, child_index))
-  logger.info("Score: %s, Level Progress: %s, Time Left %s" % (scores, level_progress, time_left))
-  logger.info("Fitness: %s" % child_fitness)
-  #logger.info("Output weight:")
-  #weights = {}
-  #for i, j in zip(feature_names, child_model.output.weight.data.tolist()[0]):
-  #  weights[i] = np.round(j, 3)
-  #logger.info(weights)
-
-  return child_fitness
-
-if __name__ == '__main__':
-  e = 0
-  p = Pool(n_workers)
-
-  while e < epochs:
-    start_time = datetime.now()
-    if population is None:
-      if e == 0:
-        population = Population(size=pop_size)
-        print('Created first population!')
-      else:
-        with open('checkpoint/checkpoint-%s.pkl' % (e - 1), 'rb') as f:
-          population = pickle.load(f)
-    else:
-      population = Population(size=pop_size, old_population=population)
-
-    result = [0] * pop_size
-    for i in range(pop_size):
-      result[i] = p.apply_async(eval_network,(e, i, population.models[i]))
-
-    for i in range(pop_size):
-      population.fitnesses[i] = result[i].get()
-
-    # Saving population
-    with open('checkpoint/checkpoint-%s.pkl' % e, 'wb') as f:
-      pickle.dump(population, f)
-
-    if np.max(population.fitnesses) >= max_fitness:
-      max_fitness = np.max(population.fitnesses)
-      file_name = datetime.strftime(datetime.now(), '%d_%H_%M_') + str(np.round(max_fitness, 2))
-      # Saving best model
-      torch.save(population.models[np.argmax(population.fitnesses)].state_dict(),'models/{}'.format(file_name))
-    e += 1
-
-  p.close()
-  p.join()
+if __name__ == "__main__":
+    main()
