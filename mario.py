@@ -1,123 +1,150 @@
 import numpy as np
-import io
-import torch
-import logging
-from datetime import datetime
-import pickle
-from core.genetic_algorithm import get_action, Population
-from core.utils import do_action, do_action_multiple, fitness_calc
-from pyboy import PyBoy
-from multiprocessing import Pool, cpu_count
+from pyboy.utils import WindowEvent
 
-# logging information
-logger = logging.getLogger('mario')
-logger.setLevel(logging.INFO)
+# Action Map
+do_action_map_all = {
 
-fh = logging.FileHandler('logs.out')
-fh.setLevel(logging.INFO)
-logger.addHandler(fh)
+# following functions are for getting screen information
 
-ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
-logger.addHandler(ch)
-
-epochs = 50
-population = None
-run_per_child = 1
-max_fitness = 0
-pop_size = 1
-max_score = 999999
-#n_workers = cpu_count()
-n_workers = 10
-
-def eval_network(epoch, child_index, child_model):
-  pyboy = PyBoy('SuperMarioLand.gb', game_wrapper=True) #, window_type="headless")
-  pyboy.set_emulation_speed(3)
-  mario = pyboy.game_wrapper()
-  mario.start_game()
-  # start off with just one life each
-  mario.set_lives_left(0)
-
-  run = 0
-  scores = []
-  fitness_scores = []
-  level_progress = []
-  time_left = []
-#  prev_action = np.asarray([1,0])
-#  do_action(prev_action, pyboy)
-
-  while run < run_per_child:
-
-    # do some things
-    action = get_action(pyboy, mario, child_model)
-    action = action.detach().numpy()
-    action = np.where(action < np.max(action), 0, action)
-    action = np.where(action == np.max(action), 1, action)
-    action = action.astype(int)
-    action = action.reshape((2,))
-#    do_action_multiple(prev_action,action,pyboy)
-    do_action(action, pyboy)
-#    prev_action = action
-
-    # Game over:
-    if mario.game_over() or mario.score == max_score:
-      scores.append(mario.score)
-      #fitness_scores.append(mario.fitness)
-      fitness_scores.append(fitness_calc(mario.score, mario.level_progress, mario.time_left))
-      level_progress.append(mario.level_progress)
-      time_left.append(mario.time_left)
-      if run == run_per_child - 1:
-        pyboy.stop()
-      else:
-        mario.reset_game()
-      run += 1
-
-  child_fitness = np.average(fitness_scores)
-  logger.info("-" * 20)
-  logger.info("Iteration %s - child %s" % (epoch, child_index))
-  logger.info("Score: %s, Level Progress: %s, Time Left %s" % (scores, level_progress, time_left))
-  logger.info("Fitness: %s" % child_fitness)
-  #logger.info("Output weight:")
-  #weights = {}
-  #for i, j in zip(feature_names, child_model.output.weight.data.tolist()[0]):
-  #  weights[i] = np.round(j, 3)
-  #logger.info(weights)
-
-  return child_fitness
-
-if __name__ == '__main__':
-  e = 0
-  p = Pool(n_workers)
-
-  while e < epochs:
-    start_time = datetime.now()
-    if population is None:
-      if e == 0:
-        population = Population(size=pop_size)
-        print('Created first population!')
-      else:
-        with open('checkpoint/checkpoint-%s.pkl' % (e - 1), 'rb') as f:
-          population = pickle.load(f)
+def convert_area(area_mapping, screen_area):
+    """
+    Converts the game's screen area based on the provided area mapping.
+    
+    Args:
+        area_mapping: A mapping dictionary or list for converting game screen values
+        screen_area: The current game screen area as a numpy array
+    
+    Returns:
+        Converted screen area based on the mapping
+    """
+    if area_mapping is None:
+        return screen_area
+    
+    if isinstance(area_mapping, dict):
+        # Convert using dictionary mapping
+        converted = np.copy(screen_area)
+        for original, mapped in area_mapping.items():
+            converted[screen_area == original] = mapped
+        return converted
+    elif isinstance(area_mapping, (list, np.ndarray)):
+        # Convert using array indexing
+        return np.array([area_mapping[val] if val < len(area_mapping) else val for val in screen_area.flatten()]).reshape(screen_area.shape)
     else:
-      population = Population(size=pop_size, old_population=population)
+        # No valid mapping provided, return original
+        return screen_area
 
-    result = [0] * pop_size
-    for i in range(pop_size):
-      result[i] = p.apply_async(eval_network,(e, i, population.models[i]))
+def get_screen_area(pyboy_instance, x_start=0, y_start=0, width=None, height=None):
+    """
+    Extract a specific area of the game screen.
+    
+    Args:
+        pyboy_instance: Instance of PyBoy emulator
+        x_start: Starting x coordinate (default: 0)
+        y_start: Starting y coordinate (default: 0)
+        width: Width of area to extract (default: full width)
+        height: Height of area to extract (default: full height)
+    
+    Returns:
+        Extracted screen area as numpy array
+    """
+    game_area = pyboy_instance.game_area()
+    
+    if width is None:
+        width = game_area.shape[1] - x_start
+    if height is None:
+        height = game_area.shape[0] - y_start
+    
+    return game_area[y_start:y_start+height, x_start:x_start+width]
 
-    for i in range(pop_size):
-      population.fitnesses[i] = result[i].get()
+def get_mario_position(pyboy_instance):
+    """
+    Get Mario's position from memory.
+    
+    Args:
+        pyboy_instance: Instance of PyBoy emulator
+    
+    Returns:
+        Tuple of (x, y) position
+    """
+    try:
+        # For Super Mario Land, these memory addresses typically contain Mario's position
+        mario_x = pyboy_instance.memory[0xC202]
+        mario_y = pyboy_instance.memory[0xC201]
+        return mario_x, mario_y
+    except:
+        # Fallback if memory addresses don't work
+        return 0, 0
 
-    # Saving population
-    with open('checkpoint/checkpoint-%s.pkl' % e, 'wb') as f:
-      pickle.dump(population, f)
+def get_mario_level_progress(pyboy_instance):
+    """
+    Get Mario's level progress from memory.
+    
+    Args:
+        pyboy_instance: Instance of PyBoy emulator
+    
+    Returns:
+        Level progress value
+    """
+    try:
+        # This is an approximation - the actual memory address may vary
+        return pyboy_instance.memory[0xC202]
+    except:
+        return 0
 
-    if np.max(population.fitnesses) >= max_fitness:
-      max_fitness = np.max(population.fitnesses)
-      file_name = datetime.strftime(datetime.now(), '%d_%H_%M_') + str(np.round(max_fitness, 2))
-      # Saving best model
-      torch.save(population.models[np.argmax(population.fitnesses)].state_dict(),'models/{}'.format(file_name))
-    e += 1
+def calculate_fitness(pyboy_instance, prev_fitness=0):
+    """
+    Calculate a basic fitness score for Mario based on his x position.
+    
+    Args:
+        pyboy_instance: Instance of PyBoy emulator
+        prev_fitness: Previous fitness score
+    
+    Returns:
+        Current fitness score
+    """
+    # This is a basic fitness function - you might want to customize this
+    # based on Mario's position, score, lives, etc.
+    
+    # Try to get Mario's x position from memory (address varies by game)
+    # For Super Mario Land, Mario's x position is typically around 0xC201-0xC203
+    try:
+        mario_x = pyboy_instance.memory[0xC202]  # This might need adjustment
+        fitness = mario_x + prev_fitness * 0.9  # Small momentum from previous fitness
+        return max(fitness, prev_fitness)  # Ensure fitness doesn't decrease much
+    except:
+        # Fallback: just use a basic scoring mechanism
+        return prev_fitness + 1
 
-  p.close()
-  p.join()
+def mario_controls():
+    """
+    Returns a dictionary mapping action indices to PyBoy WindowEvent controls.
+    
+    Returns:
+        Dictionary with action mappings
+    """
+    return {
+        0: [],  # No action
+        1: [WindowEvent.PRESS_ARROW_RIGHT],  # Move right
+        2: [WindowEvent.PRESS_ARROW_LEFT],   # Move left  
+        3: [WindowEvent.PRESS_BUTTON_A],     # Jump
+        4: [WindowEvent.PRESS_BUTTON_B],     # Run/Fire
+        5: [WindowEvent.PRESS_ARROW_RIGHT, WindowEvent.PRESS_BUTTON_A],  # Right + Jump
+        6: [WindowEvent.PRESS_ARROW_LEFT, WindowEvent.PRESS_BUTTON_A],   # Left + Jump
+        7: [WindowEvent.PRESS_ARROW_RIGHT, WindowEvent.PRESS_BUTTON_B],  # Right + Run
+        8: [WindowEvent.PRESS_ARROW_LEFT, WindowEvent.PRESS_BUTTON_B],   # Left + Run
+    }
+
+# Legacy functions for compatibility (if needed by other parts)
+def get_mario(pyboy):
+    """Legacy function - get mario location directly from memory"""
+    try:
+        mario_x = pyboy.memory[0xC202]
+        mario_y = pyboy.memory[0xC201]
+        return [mario_x, mario_y]
+    except:
+        return [0, 0]
+
+def fitness_calc(score, level_progress, time_left):
+    """Legacy fitness calculation function"""
+    level_progress = level_progress - 250
+    return level_progress**2
